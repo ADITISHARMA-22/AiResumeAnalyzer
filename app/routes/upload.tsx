@@ -7,6 +7,69 @@ import { convertPdfToImage } from "~/lib/pdf2img";
 import { generateUUID } from "~/lib/utils";
 import { AIResponseFormat, prepareInstructions } from "../../constants";
 
+const emptyFeedback: Feedback = {
+  overallScore: 0,
+  ATS: { score: 0, tips: [] },
+  toneAndStyle: { score: 0, tips: [] },
+  content: { score: 0, tips: [] },
+  structure: { score: 0, tips: [] },
+  skills: { score: 0, tips: [] },
+};
+
+const normalizeFeedback = (value: unknown): Feedback => {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const candidate = value as Partial<Feedback>;
+
+    return {
+      overallScore:
+        typeof candidate.overallScore === "number" ? candidate.overallScore : 0,
+      ATS: {
+        score:
+          typeof candidate.ATS?.score === "number" ? candidate.ATS.score : 0,
+        tips: Array.isArray(candidate.ATS?.tips) ? candidate.ATS.tips : [],
+      },
+      toneAndStyle: {
+        score:
+          typeof candidate.toneAndStyle?.score === "number"
+            ? candidate.toneAndStyle.score
+            : 0,
+        tips: Array.isArray(candidate.toneAndStyle?.tips)
+          ? candidate.toneAndStyle.tips
+          : [],
+      },
+      content: {
+        score:
+          typeof candidate.content?.score === "number"
+            ? candidate.content.score
+            : 0,
+        tips: Array.isArray(candidate.content?.tips)
+          ? candidate.content.tips
+          : [],
+      },
+      structure: {
+        score:
+          typeof candidate.structure?.score === "number"
+            ? candidate.structure.score
+            : 0,
+        tips: Array.isArray(candidate.structure?.tips)
+          ? candidate.structure.tips
+          : [],
+      },
+      skills: {
+        score:
+          typeof candidate.skills?.score === "number"
+            ? candidate.skills.score
+            : 0,
+        tips: Array.isArray(candidate.skills?.tips)
+          ? candidate.skills.tips
+          : [],
+      },
+    };
+  }
+
+  return emptyFeedback;
+};
+
 const Upload = () => {
   const { auth, isLoading, fs, ai, kv } = usePuterStore();
   const navigate = useNavigate();
@@ -35,29 +98,47 @@ const Upload = () => {
     const uploadedFile = await fs.upload([file]);
     if (!uploadedFile) return setStatusText("Error: Failed to upload file");
 
-    setStatusText("Converting to image...");
-    const imageFile = await convertPdfToImage(file);
-    if (!imageFile.file)
-      return setStatusText("Error: Failed to convert PDF to image");
+    let uploadedImage;
+    if (file.type?.includes("pdf")) {
+      setStatusText("Preparing a preview for your resume...");
+      const imageFile = await convertPdfToImage(file);
+      if (!imageFile.file) {
+        setStatusText(
+          `Preview unavailable: ${imageFile.error || "Failed to convert PDF to image"}`,
+        );
+      } else {
+        if (imageFile.error) {
+          setStatusText(
+            "Preview generation had an issue, but the analysis will continue.",
+          );
+        }
 
-    setStatusText("Uploading the image...");
-    const uploadedImage = await fs.upload([imageFile.file]);
-    if (!uploadedImage) return setStatusText("Error: Failed to upload image");
+        setStatusText("Uploading the preview...");
+        uploadedImage = await fs.upload([imageFile.file]);
+        if (!uploadedImage) {
+          return setStatusText("Error: Failed to upload preview image");
+        }
+      }
+    }
+
+    if (!uploadedImage) {
+      uploadedImage = { path: "" } as FSItem;
+    }
 
     setStatusText("Preparing data...");
     const uuid = generateUUID();
     const data = {
       id: uuid,
       resumePath: uploadedFile.path,
-      imagePath: uploadedImage.path,
+      imagePath: uploadedImage.path || "",
       companyName,
       jobTitle,
       jobDescription,
-      feedback: "",
-    };
+      feedback: emptyFeedback,
+    } as Resume & { jobDescription: string };
     await kv.set(`resume:${uuid}`, JSON.stringify(data));
 
-    setStatusText("Analyzing...");
+    setStatusText("Analyzing your resume with AI...");
 
     const feedback = await ai.feedback(
       uploadedFile.path,
@@ -68,9 +149,21 @@ const Upload = () => {
     const feedbackText =
       typeof feedback.message.content === "string"
         ? feedback.message.content
-        : feedback.message.content[0].text;
+        : feedback.message.content[0]?.text || "";
 
-    data.feedback = JSON.parse(feedbackText);
+    const cleanedFeedbackText = feedbackText
+      .trim()
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```$/i, "")
+      .trim();
+
+    try {
+      data.feedback = normalizeFeedback(JSON.parse(cleanedFeedbackText));
+    } catch {
+      data.feedback = emptyFeedback;
+    }
+
     await kv.set(`resume:${uuid}`, JSON.stringify(data));
     setStatusText("Analysis complete, redirecting...");
     console.log(data);
@@ -81,13 +174,16 @@ const Upload = () => {
     e.preventDefault();
     const form = e.currentTarget.closest("form");
     if (!form) return;
+
     const formData = new FormData(form);
+    const companyName = (formData.get("company-name") as string) || "";
+    const jobTitle = (formData.get("job-title") as string) || "";
+    const jobDescription = (formData.get("job-description") as string) || "";
 
-    const companyName = formData.get("company-name") as string;
-    const jobTitle = formData.get("job-title") as string;
-    const jobDescription = formData.get("job-description") as string;
-
-    if (!file) return;
+    if (!file) {
+      setStatusText("Please upload a PDF resume before submitting.");
+      return;
+    }
 
     handleAnalyze({ companyName, jobTitle, jobDescription, file });
   };

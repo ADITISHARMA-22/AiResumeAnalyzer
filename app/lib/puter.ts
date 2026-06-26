@@ -176,7 +176,12 @@ export const usePuterStore = create<PuterStore>((set, get) => {
 
     try {
       await puter.auth.signIn();
-      await checkAuthStatus();
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const authenticated = await checkAuthStatus();
+        if (authenticated) return;
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Sign in failed";
       setError(msg);
@@ -350,7 +355,11 @@ export const usePuterStore = create<PuterStore>((set, get) => {
           ],
         },
       ],
-      { model: "claude-sonnet-4" },
+      {
+        model: "gpt-4.1-mini",
+        temperature: 0.2,
+        max_tokens: 1800,
+      },
     ) as Promise<AIResponse | undefined>;
   };
 

@@ -10,12 +10,37 @@ export const meta = () => [
 const auth = () => {
   const { isLoading, auth } = usePuterStore();
   const location = useLocation();
-  const next = location.search.split("next=")[1];
   const navigate = useNavigate();
+  const nextPath = new URLSearchParams(location.search).get("next") || "/";
 
   useEffect(() => {
-    if (auth.isAuthenticated) navigate(next);
-  }, [auth.isAuthenticated, next]);
+    if (auth.isAuthenticated) {
+      navigate(nextPath, { replace: true });
+    }
+  }, [auth.isAuthenticated, nextPath, navigate]);
+
+  const handleAuthAction = async () => {
+    if (auth.isAuthenticated) {
+      await auth.signOut();
+      return;
+    }
+
+    await auth.signIn();
+
+    const authenticated = await auth.checkAuthStatus();
+    if (authenticated) {
+      navigate(nextPath, { replace: true });
+      return;
+    }
+
+    window.setTimeout(() => {
+      void auth.checkAuthStatus().then((isAuthed) => {
+        if (isAuthed) {
+          navigate(nextPath, { replace: true });
+        }
+      });
+    }, 800);
+  };
 
   return (
     <main className="bg-[url('/images/bg-auth.svg')] bg-cover min-h-screen flex items-center justify-center">
@@ -33,11 +58,11 @@ const auth = () => {
             ) : (
               <>
                 {auth.isAuthenticated ? (
-                  <button className="auth-button" onClick={auth.signOut}>
+                  <button className="auth-button" onClick={handleAuthAction}>
                     <p>Log Out</p>
                   </button>
                 ) : (
-                  <button className="auth-button" onClick={auth.signIn}>
+                  <button className="auth-button" onClick={handleAuthAction}>
                     <p>Log In</p>
                   </button>
                 )}
