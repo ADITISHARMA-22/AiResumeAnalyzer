@@ -85,3 +85,5 @@ This template comes with [Tailwind CSS](https://tailwindcss.com/) already config
 ---
 
 Built with ❤️ using React Router.
+
+deployment link : ai-resume-analyzer-kyie3nsgw-aditisharma-22s-projects.vercel.app
